@@ -9,6 +9,11 @@ class WheelController {
  public:
   WheelController();
 
+  // Derleme zamani surumu; kartin hangi firmware ikilisini calistirdigi
+  // konsol bastirimi ile dogrulanabilir.
+  static constexpr const char* kFirmwareVersion =
+      "1.1.0-centering-pwm-floor";
+
   void begin(uint32_t nowMs);
   void update(uint32_t nowMs);
   void handleCommand(char* line, uint32_t nowMs);
@@ -62,6 +67,13 @@ class WheelController {
   float requestedOutputPercent_ = 0.0F;
   float appliedOutputPercent_ = 0.0F;
 
+  // Merkezleme telemetrisi icin ayrilan degerler (PD talep, slew cikisi,
+  // nihai PWM). commandContinuousMotor'dan ayirilarak %1-21 cikisini
+  // gizlemek engellenir.
+  float centeringPdRequested_ = 0.0F;
+  float centeringSlewOutput_ = 0.0F;
+  uint8_t centeringFinalPwm_ = 0U;
+
   bool ffbControlActive_ = false;
   int16_t ffbCommandPercent_ = 0;
   uint32_t lastFfbCommandMs_ = 0U;
@@ -72,6 +84,7 @@ class WheelController {
   bool safetyFaultReported_ = false;
   bool watchdogResetAtBoot_ = false;
   bool persistentConfigLoaded_ = false;
+  bool gameFfbModeActive_ = false;
 
   char commandBuffer_[48] = {};
   uint8_t commandLength_ = 0U;
@@ -92,6 +105,7 @@ class WheelController {
                           uint32_t nowMs);
   void commandContinuousMotor(float signedOutputPercent, MotionOwner owner,
                               uint32_t nowMs);
+  void commandCenteringMotor(float appliedOutput, uint32_t nowMs);
   void applyMotorCommand(const wheel::MotorCommand& command);
 
   void startPositionMove(float requestedAngle, uint32_t nowMs);

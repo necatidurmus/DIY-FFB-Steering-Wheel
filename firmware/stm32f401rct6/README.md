@@ -94,26 +94,44 @@ eden imzalı PWM talebidir; gerçek tork, HID PID veya oyun FFB'si değildir.
 Gereksinimler: PlatformIO Core, `ststm32` 19.5.0 ve STM32duino 2.12.0.
 
 ```bash
-cd f401rct6-native
+cd firmware/stm32f401rct6
 pio run -e f401rct6
 pio run -e f401rct6 -t upload
 pio device monitor -b 115200
 ```
 
-Varsayılan upload ST-Link'tir. SWDIO, SWCLK, GND ve tercihen NRST bağlanır.
-Motorun 12 V beslemesi firmware yüklerken kapalı tutulur.
+Varsayılan yükleme yolu STM32'nin ROM'daki USB DFU bootloader'ıdır. Motorun
+12 V beslemesini firmware yüklenirken kapalı tutun. DFU'ya giriş sırası:
 
-Kart ROM DFU bootloader'a BOOT0/RESET ile girebiliyor ve PA11/PA12 USB hattı
-doğru bağlıysa geçici olarak:
+1. USB'yi ve motorun 12 V beslemesini ayırın.
+2. `BOOT0` pinini 3,3 V seviyesine (HIGH) alın.
+3. Kartı yeniden besleyin veya `RESET`/`NRST` darbesi uygulayın.
+4. USB-C veri hattını bağlayın. `lsusb` çıktısında `0483:df11` ve
+   `dfu-util -l` çıktısında STM32 bootloader görülmelidir.
+5. `pio run -e f401rct6 -t upload` komutunu çalıştırın.
+6. Yükleme bittikten sonra `BOOT0` pinini LOW seviyesine geri alın ve uygulamayı
+   başlatmak için yeniden RESET uygulayın. `:leave` isteği uygulamaya geçişi
+   dener; BOOT0'ın LOW yapılması sonraki resetler için yine zorunludur.
 
-test edilmedi; ST-Link kurtarma yolu olarak tutulmalıdır.
+ROM USB DFU, PA11/PA12 yanında bootloader'ın desteklediği ve çalışan bir
+harici saat kaynağı da gerektirir. Kartın HSE kristali/clock donanımı
+doğrulanmalıdır. Yalnız güç taşıyan USB-C kablosu kullanılamaz.
+
+Board tanımı uygulamanın USB kimliğini `0483:5740`, ROM DFU kimliğini
+`0483:df11` olarak eşler. DFU indirme adresi açıkça `0x08000000`'dır. Komut
+yalnız oluşan binary uzunluğunu bu adresten itibaren yazar; `mass-erase`
+kullanmaz.
+
+ST-Link varsayılan yükleyici değildir. Yalnız SWD debug veya BOOT0/USB/Flash
+sorunlarında kurtarma için kullanılır:
+
 ```bash
-pio run -e f401rct6_dfu -t upload
+pio run -e f401rct6_stlink -t upload
 ```
 
-DFU bu özel kart üzerinde test edilmedi; ST-Link kurtarma yolu olarak
-tutulmalıdır.
-test edilmedi; ST-Link kurtarma yolu olarak tutulmalıdır.
+ROM DFU modunda yükleme yapılabilmesi, normal firmware'in USB HID direksiyon
+veya HID PID FFB olarak çalıştığı anlamına gelmez. Bunlar ayrı USB aygıt
+katmanlarıdır; HID/HID PID desteği henüz tamamlanmamıştır.
 
 Kalıcı ayarlar F401'in son 128 KB Flash sektöründedir (sector 5,
 `0x08020000`). Özel board tanımı uygulamayı ilk 128 KB ile sınırlar; böylece
@@ -124,7 +142,8 @@ durdurur, tek buffered erase/program yapar ve kaydı geri okuyup CRC ile doğrul
 
 İlk testte motorun 12 V hattı **kapalı** olmalıdır.
 
-1. Firmware'i ST-Link ile yükleyin; PB5'in LOW, PB8/PB9 duty'nin sıfır olduğunu
+1. Firmware'i yukarıdaki USB DFU adımlarıyla yükleyin; PB5'in LOW, PB8/PB9
+   duty'nin sıfır olduğunu
    osiloskop/lojik analizörle doğrulayın.
 2. CDC enumerate olmuyorsa saat/kablo/PA11/PA12 donanımını inceleyin veya UART
    derlemesini kullanın. USB çalışıyor diye yalnızca derlemeden sonuç çıkarmayın.

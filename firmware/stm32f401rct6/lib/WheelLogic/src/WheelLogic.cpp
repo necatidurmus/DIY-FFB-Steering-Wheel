@@ -228,33 +228,25 @@ float computeCenteringDemand(float angleDegrees,
 
 float applyVirtualEndstop(float requestedOutputPercent, float angleDegrees,
                           uint16_t rotationDegrees, float rampDegrees,
-                          float maximumEndstopPercent) {
+                          float startPwmPercent, float maximumEndstopPercent) {
+  (void)requestedOutputPercent;  // C3: sanal sınır istenen değeri tamamen ezer
   const float limit = rotationDegrees * 0.5F;
   const float absoluteAngle = std::fabs(angleDegrees);
   if (limit <= 0.0F || rampDegrees <= 0.0F ||
-      maximumEndstopPercent <= 0.0F ||
-      absoluteAngle <= limit - rampDegrees) {
+      startPwmPercent < 0.0F || maximumEndstopPercent <= 0.0F ||
+      absoluteAngle < limit - rampDegrees) {
     return requestedOutputPercent;
   }
 
-  const float inwardSign = angleDegrees > 0.0F ? -1.0F : 1.0F;
-  if (absoluteAngle >= limit) {
-    return inwardSign * maximumEndstopPercent;
-  }
-
-  const float position =
+  const float endstopPosition =
       (absoluteAngle - (limit - rampDegrees)) / rampDegrees;
-  const float endstopMagnitude = maximumEndstopPercent * smoothstep(position);
-  const bool requestedInward =
-      requestedOutputPercent == 0.0F ||
-      ((requestedOutputPercent > 0.0F) == (inwardSign > 0.0F));
-  if (requestedInward) {
-    const float magnitude =
-        std::fmax(std::fabs(requestedOutputPercent), endstopMagnitude);
-    return inwardSign * magnitude;
-  }
-  return clampFloat(requestedOutputPercent + inwardSign * endstopMagnitude,
-                    -maximumEndstopPercent, maximumEndstopPercent);
+  const float smoothStep = smoothstep(endstopPosition);
+  const float endstopMagnitude =
+      startPwmPercent +
+      (maximumEndstopPercent - startPwmPercent) * smoothStep;
+
+  // Kuvvet her zaman merkeze doğru: pozitif açı için negatif, negatif için pozitif
+  return angleDegrees > 0.0F ? -endstopMagnitude : endstopMagnitude;
 }
 
 MotorDirection directionForDemand(float signedDemand,
@@ -282,16 +274,19 @@ WheelSettings defaultSettings() {
   WheelSettings settings{};
   settings.centeringKp = 0.40F;
   settings.centeringKd = 0.025F;
-  settings.slewRatePercentPerSecond = 80.0F;
+  settings.slewRatePercentPerSecond = 200.0F;
   settings.steeringRotationDegrees = 900U;
   settings.centerRaw = 1708U;
-  settings.maximumPwmPercent = 30U;
-  settings.maximumCenteringPwmPercent = 25U;
-  settings.maximumEndstopPwmPercent = 30U;
+  settings.maximumPwmPercent = 50U;       // Manuel PWM max
+  settings.maximumCenteringPwmPercent = 35U;  // PD merkezleme max
+  settings.maximumEndstopPwmPercent = 100U;   // Sanal sınır max (PD'den bağımsız)
   settings.motorDirectionSign = -1;
   settings.encoderDirectionSign = 1;
   settings.sensorCalibrated = 0U;
   settings.directionValidated = 0U;
+  settings.gameFfbMaxPwmPercent = 90U;
+  settings.ffbGainPercent = 100U;
+  settings.ffbDeadzonePercent = 5U;
   return settings;
 }
 
@@ -309,14 +304,73 @@ bool settingsAreValid(const WheelSettings& settings) {
          settings.centerRaw < kEncoderCountsPerTurn &&
          settings.maximumPwmPercent >= 1U &&
          settings.maximumPwmPercent <= 50U &&
+         settings.maximumCenteringPwmPercent >= 1U &&
          settings.maximumCenteringPwmPercent <= settings.maximumPwmPercent &&
-         settings.maximumEndstopPwmPercent <= settings.maximumPwmPercent &&
+         settings.maximumEndstopPwmPercent >= 1U &&
+         settings.maximumEndstopPwmPercent <= 100U &&
          (settings.motorDirectionSign == -1 ||
           settings.motorDirectionSign == 1) &&
          (settings.encoderDirectionSign == -1 ||
           settings.encoderDirectionSign == 1) &&
          settings.sensorCalibrated <= 1U &&
-         settings.directionValidated <= 1U;
+         settings.directionValidated <= 1U &&
+         settings.gameFfbMaxPwmPercent >= 1U &&
+         settings.gameFfbMaxPwmPercent <= 90U &&
+         settings.ffbGainPercent >= 1U && settings.ffbGainPercent <= 100U &&
+         settings.ffbDeadzonePercent <= 50U;
+}
+
+uint8_t ffbForceToPwm(int16_t forcePercent, uint8_t gainPercent,
+                      uint8_t deadzonePercent, uint8_t maxPwmPercent) {
+  if (forcePercent == 0 || maxPwmPercent == 0U) {
+    return 0U;
+  }
+
+  const int32_t effectiveForce =
+      static_cast<int32_t>(forcePercent) *
+      static_cast<int32_t>(gainPercent) / 100;
+  const int32_t absForce = effectiveForce < 0 ? -effectiveForce : effectiveForce;
+
+  // Kucuk oyun kuvvetleri deadzone'nin altinda 0 cikar; titreşime yol
+  // acan zorla %22'ye sabitleme yapilmaz.
+  if (absForce <= static_cast<int32_t>(deadzonePercent)) {
+    return 0U;
+  }
+
+  // Lineer: deadzone -> 0 PWM, 100% kuvvet -> maxPwmPercent PWM.
+  // Motorun ~22% minimum etkili esigi bilincinde bu bucaq korundu;
+  // dusuk kuvvetlerde motor hareket etmeyebilir ama cikis ani degismez.
+  // Yuvarlama eklenerek cok kucuk kuvvetlerde de sifirdan farkli cikis
+  // elde edilebilir (ancak asla %22'ye zorla sabitlenmez).
+  const int32_t range = 100 - static_cast<int32_t>(deadzonePercent);
+  const int32_t pwm =
+      ((absForce - static_cast<int32_t>(deadzonePercent)) *
+           static_cast<int32_t>(maxPwmPercent) +
+       range / 2) /
+      range;
+
+  int32_t clamped = pwm;
+  if (clamped > static_cast<int32_t>(maxPwmPercent)) {
+    clamped = static_cast<int32_t>(maxPwmPercent);
+  }
+  if (clamped < 0) {
+    clamped = 0;
+  }
+  return static_cast<uint8_t>(clamped);
+}
+
+uint8_t centeringAppliedOutputToPwm(float appliedOutput) {
+  if (std::fabs(appliedOutput) < 0.5F) {
+    return 0U;
+  }
+  float pwm = std::fabs(appliedOutput);
+  if (pwm < 25.0F) {
+    pwm = 25.0F;
+  }
+  if (pwm > 100.0F) {
+    pwm = 100.0F;
+  }
+  return static_cast<uint8_t>(pwm + 0.5F);
 }
 
 uint32_t crc32(const uint8_t* data, size_t length) {
