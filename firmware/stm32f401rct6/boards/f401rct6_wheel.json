@@ -1,0 +1,33 @@
+{
+  "build": {
+    "arduino": {
+      "variant_h": "variant_generic.h"
+    },
+    "core": "stm32",
+    "cpu": "cortex-m4",
+    "extra_flags": "-DSTM32F4 -DSTM32F401xC -DSTM32F4xx -DARDUINO_GENERIC_F401RCTX",
+    "f_cpu": "84000000L",
+    "hwids": [
+      ["0x0483", "0x5740"]
+    ],
+    "mcu": "stm32f401rct6",
+    "product_line": "STM32F401xC",
+    "variant": "STM32F4xx/F401R(B-C-D-E)T"
+  },
+  "debug": {
+    "default_tools": ["stlink"],
+    "jlink_device": "STM32F401RC",
+    "openocd_target": "stm32f4x",
+    "svd_path": "STM32F401x.svd"
+  },
+  "frameworks": ["arduino", "cmsis", "stm32cube"],
+  "name": "STM32F401RCT6 Wheel (128K app + 128K config sector)",
+  "upload": {
+    "maximum_ram_size": 65536,
+    "maximum_size": 131072,
+    "protocol": "stlink",
+    "protocols": ["dfu", "jlink", "serial", "stlink"]
+  },
+  "url": "https://www.st.com/en/microcontrollers-microprocessors/stm32f401rc.html",
+  "vendor": "Custom"
+}
