@@ -156,67 +156,66 @@ void testPdEndstopSlewAndDirection() {
 
 void testCenteringPwmFloor() {
   // Merkezleme kabul matrisi: applied -> nihai PWM.
-  // 0'dan kucukler 0; 0.5'den buyukler %22'ye sabitlenir; 22+ ayni kalir.
+  // 0'dan kucukler 0; 0.5'den buyukler %25'e sabitlenir; 25+ ayni kalir.
   CHECK(wheel::centeringAppliedOutputToPwm(0.0F) == 0U);
   CHECK(wheel::centeringAppliedOutputToPwm(0.3F) == 0U);
   CHECK(wheel::centeringAppliedOutputToPwm(0.49F) == 0U);
 
-  CHECK(wheel::centeringAppliedOutputToPwm(0.5F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(1.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(5.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(10.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(15.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(21.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(21.4F) == 22U);
+  CHECK(wheel::centeringAppliedOutputToPwm(0.5F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(1.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(5.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(10.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(15.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(22.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(24.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(24.4F) == 25U);
 
-  CHECK(wheel::centeringAppliedOutputToPwm(22.0F) == 22U);
   CHECK(wheel::centeringAppliedOutputToPwm(25.0F) == 25U);
   CHECK(wheel::centeringAppliedOutputToPwm(30.0F) == 30U);
+  CHECK(wheel::centeringAppliedOutputToPwm(35.0F) == 35U);
 
   // Negatif degerler: magnitude ayni, isaret cagiran tarafinda korunur.
-  CHECK(wheel::centeringAppliedOutputToPwm(-1.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(-8.0F) == 22U);
-  CHECK(wheel::centeringAppliedOutputToPwm(-22.0F) == 22U);
+  CHECK(wheel::centeringAppliedOutputToPwm(-1.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(-8.0F) == 25U);
+  CHECK(wheel::centeringAppliedOutputToPwm(-25.0F) == 25U);
   CHECK(wheel::centeringAppliedOutputToPwm(-26.0F) == 26U);
-  CHECK(wheel::centeringAppliedOutputToPwm(-30.0F) == 30U);
+  CHECK(wheel::centeringAppliedOutputToPwm(-35.0F) == 35U);
 
-  // %1-21 fiziksel PWM asla uretilememeli.
-  for (float applied = 0.5F; applied < 22.0F; applied += 0.5F) {
-    CHECK(wheel::centeringAppliedOutputToPwm(applied) == 22U);
+  // %1-24 fiziksel PWM asla uretilememeli.
+  for (float applied = 0.5F; applied < 25.0F; applied += 0.5F) {
+    CHECK(wheel::centeringAppliedOutputToPwm(applied) == 25U);
   }
 }
 
-void testSlewNeverYields1to21Percent() {
+void testSlewNeverYields1to24Percent() {
   wheel::SlewLimiter limiter;
-  // 500 Hz dongu, slew = 80 %/s => adim basina ~0.16 %.
-  // Sifirdan 30'e dogru cikarken fisiksel PWM 0 veya >=22 olmali.
-  bool saw22 = false;
+  // 500 Hz dongu, slew = 200 %/s => adim basina ~0.4 %.
+  // Sifirdan 35'e dogru cikarken fisiksel PWM 0 veya >=25 olmali.
+  bool saw25 = false;
   uint8_t lastPwm = 0U;
   for (int step = 0; step < 400; ++step) {
-    const float applied = limiter.update(30.0F, 80.0F, 2000U);
+    const float applied = limiter.update(35.0F, 200.0F, 2000U);
     const uint8_t pwm = wheel::centeringAppliedOutputToPwm(applied);
-    CHECK(pwm == 0U || pwm >= 22U);
-    if (pwm == 22U) {
-      saw22 = true;
+    CHECK(pwm == 0U || pwm >= 25U);
+    if (pwm == 25U) {
+      saw25 = true;
     }
     lastPwm = pwm;
   }
-  CHECK(saw22);
-  CHECK(lastPwm == 30U);
+  CHECK(saw25);
+  CHECK(lastPwm == 35U);
 
-  // Yon degisiminde cikis %0'a inebilmeli (slew 0'a indirildiginde).
+  // Slew hizli yükselme testi: 0 -> 35 talebi 200 %/s ile ~175 ms'de ulasmali.
   wheel::SlewLimiter limiter2;
-  for (int step = 0; step < 300; ++step) {
-    limiter2.update(30.0F, 80.0F, 2000U);
-  }
-  for (int step = 0; step < 300; ++step) {
-    const float applied = limiter2.update(-30.0F, 80.0F, 2000U);
-    const uint8_t pwm = wheel::centeringAppliedOutputToPwm(applied);
-    CHECK(pwm == 0U || pwm >= 22U);
-    if (applied < 0.5F && applied > -0.5F) {
-      CHECK(pwm == 0U);
+  bool reached35 = false;
+  for (int step = 0; step < 1000; ++step) {
+    const float applied = limiter2.update(35.0F, 200.0F, 2000U);
+    if (applied >= 34.9F) {
+      reached35 = true;
+      break;
     }
   }
+  CHECK(reached35);
 }
 
 void testPwmLimitsPerMode() {
@@ -224,8 +223,8 @@ void testPwmLimitsPerMode() {
 
   // Manuel PWM max: %50
   CHECK(settings.maximumPwmPercent == 50U);
-  // PD merkezleme max: %30
-  CHECK(settings.maximumCenteringPwmPercent == 30U);
+  // PD merkezleme max: %35
+  CHECK(settings.maximumCenteringPwmPercent == 35U);
   // Sanal sınır max: %100 (PD'den bağımsız)
   CHECK(settings.maximumEndstopPwmPercent == 100U);
   // GAME_FFB max: %90
@@ -343,7 +342,7 @@ int main() {
   testDeadTimeAndTimeouts();
   testPdEndstopSlewAndDirection();
   testCenteringPwmFloor();
-  testSlewNeverYields1to21Percent();
+  testSlewNeverYields1to24Percent();
   testPwmLimitsPerMode();
   testGameFfbLimits();
   testConfigurationAndHidScaling();

@@ -78,11 +78,11 @@ constexpr float kDirectionErrorMarginDegrees = 1.0F;
 namespace CenteringControl {
 constexpr float kCenterDeadbandDegrees = 0.5F;
 constexpr float kSoftZoneEndDegrees = 3.0F;
-constexpr float kMinimumEffectivePwmPercent = 22.0F;
-constexpr float kMaximumPdPwmPercent = 30.0F;
+constexpr float kMinimumEffectivePwmPercent = 25.0F;
+constexpr float kMaximumPdPwmPercent = 35.0F;
 constexpr float kDefaultKp = 0.40F;
 constexpr float kDefaultKd = 0.025F;
-constexpr float kDefaultSlewRatePercentPerSecond = 80.0F;
+constexpr float kDefaultSlewRatePercentPerSecond = 200.0F;
 constexpr float kOutputOffThresholdPercent = 0.5F;
 
 constexpr float kVirtualEndstopRampDegrees = 20.0F;

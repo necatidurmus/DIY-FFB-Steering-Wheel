@@ -274,11 +274,11 @@ WheelSettings defaultSettings() {
   WheelSettings settings{};
   settings.centeringKp = 0.40F;
   settings.centeringKd = 0.025F;
-  settings.slewRatePercentPerSecond = 80.0F;
+  settings.slewRatePercentPerSecond = 200.0F;
   settings.steeringRotationDegrees = 900U;
   settings.centerRaw = 1708U;
   settings.maximumPwmPercent = 50U;       // Manuel PWM max
-  settings.maximumCenteringPwmPercent = 30U;  // PD merkezleme max
+  settings.maximumCenteringPwmPercent = 35U;  // PD merkezleme max
   settings.maximumEndstopPwmPercent = 100U;   // Sanal sınır max (PD'den bağımsız)
   settings.motorDirectionSign = -1;
   settings.encoderDirectionSign = 1;
@@ -364,8 +364,8 @@ uint8_t centeringAppliedOutputToPwm(float appliedOutput) {
     return 0U;
   }
   float pwm = std::fabs(appliedOutput);
-  if (pwm < 22.0F) {
-    pwm = 22.0F;
+  if (pwm < 25.0F) {
+    pwm = 25.0F;
   }
   if (pwm > 100.0F) {
     pwm = 100.0F;

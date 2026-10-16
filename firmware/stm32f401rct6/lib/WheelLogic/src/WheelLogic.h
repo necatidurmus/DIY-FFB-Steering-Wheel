@@ -142,12 +142,12 @@ uint8_t ffbForceToPwm(int16_t forcePercent, uint8_t gainPercent,
 
 // Merkezleme uygulanan cikisi (slewi takiben) donanim PWM'ye cevirir.
 //  |output| < 0.5  -> 0  (merkez deadband, motor kapali)
-//  0.5 ... <22     -> 22 (fiziksel minimum etkili PWM zemini)
-//  22 ...          -> round(output)
+//  0.5 ... <25     -> 25 (fiziksel minimum etkili PWM zemini)
+//  25 ...          -> round(output)
 // Bu fonksiyon yalnizca magnitudu dondurur; isaret/yön ayrı tutulur.
 // Esik degeri include/wheel_config.h'daki
 // CenteringControl::kOutputOffThresholdPercent (0.5) ve
-// CenteringControl::kMinimumEffectivePwmPercent (22.0) ile aynidir.
+// CenteringControl::kMinimumEffectivePwmPercent (25.0) ile aynidir.
 // WheelLogic'den wheel_config'e (Arduino) bagimlilik olmamak icin sabitler
 // burada ayni degerlerle tanimlanmistir.
 uint8_t centeringAppliedOutputToPwm(float appliedOutput);
