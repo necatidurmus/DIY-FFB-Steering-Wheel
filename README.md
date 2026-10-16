@@ -5,8 +5,8 @@ BTS7960 H-bridge and AS5600 magnetic encoder.
 
 This repository contains two independent PlatformIO projects:
 
-- `firmware/stm32f401rct6`: primary development platform.
-- `firmware/esp32c3`: earlier serial-control prototype.
+- `firmware/stm32f401rct6`: active and primary development platform.
+- `firmware/esp32c3`: preserved earlier serial-control prototype.
 
 ## Current status
 
@@ -27,10 +27,14 @@ the detailed safety and bring-up procedure.
 
 ### ESP32-C3 prototype
 
+**ESP32-C3: Archived prototype — Development deferred until STM32F401RCT6 firmware is complete.**
+
 The ESP32-C3 project is retained as the earlier serial-command prototype. Its
 built-in USB Serial/JTAG peripheral is not a general-purpose USB device
 controller and cannot be used as a native USB HID PID FFB wheel. It is not the
-target for the main HID PID implementation.
+target for the main HID PID implementation. Its current sources are preserved
+without fixes, dependency changes or new features. It may be evaluated again
+after the STM32F401RCT6 roadmap is complete.
 
 ## Planned capabilities
 
@@ -60,15 +64,17 @@ See [`docs/HARDWARE.md`](docs/HARDWARE.md) before connecting motor power.
 
 ## Building
 
-Each firmware directory is a separate PlatformIO project:
+The active STM32F401RCT6 firmware is built as an independent PlatformIO
+project:
 
 ```bash
 cd firmware/stm32f401rct6
 pio run
-
-cd ../esp32c3
-pio run
 ```
+
+The archived ESP32-C3 directory retains its original independent PlatformIO
+project definition for source preservation. It is not part of the active
+development or release gate.
 
 ## Development workflow
 
@@ -81,8 +87,12 @@ Each major stage should be developed on its own branch, tested, and merged by
 pull request. For example:
 
 ```bash
-git switch -c feature/stage-3-usb-hid
+git switch -c feature/stage-2-usb-hid
 ```
+
+Unless the repository owner explicitly requests otherwise, issues, branches,
+commits and pull requests must target `firmware/stm32f401rct6/` and must not
+modify the ESP32-C3 archive. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Safety
 

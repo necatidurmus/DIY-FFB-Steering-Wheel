@@ -1,32 +1,35 @@
 # Roadmap
 
-No stage is marked complete until its firmware, host tests and required
-hardware tests are recorded. The immediate priority is Stage 0 through Stage 3
-to obtain a real USB HID steering input without weakening motor safety.
+This roadmap applies to the active STM32F401RCT6 platform. No stage is marked
+complete until its firmware, host tests and required hardware tests are
+recorded. ESP32-C3 development remains deferred until this roadmap is complete
+and the repository owner explicitly reactivates it.
 
 - [ ] **Stage 0: Firmware validation**
-  - Reproduce both PlatformIO builds from a clean checkout.
-  - Record USB, sensor, PWM and watchdog bench-test evidence.
-- [ ] **Stage 1: Motor Control & Safety**
-  - Validate direction, dead-time, limits, emergency cutoff and thermal/power
-    behavior on hardware.
-- [ ] **Stage 2: AS5600 & Calibration**
-  - Validate magnet diagnostics, multi-turn tracking, zeroing and persistent
-    calibration over power cycles and disconnects.
-- [ ] **Stage 3: Native USB HID Steering**
+  - Reproduce the STM32 PlatformIO builds and host tests from a clean checkout.
+  - Record USB, sensor, PWM and watchdog bench evidence.
+- [ ] **Stage 1: Motor control and AS5600 improvements**
+  - Validate direction, dead-time, limits, emergency cutoff, magnet
+    diagnostics, multi-turn tracking and safe calibration.
+- [ ] **Stage 2: Native USB HID steering**
   - Implement and verify standards-compliant steering input reports on Linux
     and Windows.
-- [ ] **Stage 4: Configuration & Test Application**
-  - Add a host tool for safe calibration, diagnostics and configuration.
-- [ ] **Stage 5: Universal USB HID PID FFB Engine**
+- [ ] **Stage 3: USB HID configuration and test interface**
+  - Add a host-facing interface and tool for safe calibration, diagnostics and
+    configuration.
+- [ ] **Stage 4: USB HID PID Force Feedback**
   - Implement descriptors, report handlers, effect allocation and supported
-    effect processing with conformance tests.
-- [ ] **Stage 6: Motor FFB Integration**
-  - Route effect torque requests through the existing safety and motor-control
-    layers; characterize motor output rather than treating PWM as torque.
-- [ ] **Stage 7: ETS2 / Assetto Corsa / F1 / Forza Testing**
+    effect processing, then route requests through the existing motor safety
+    layer.
+- [ ] **Stage 5: ETS2 / Assetto Corsa / F1 / Forza testing**
   - Record per-game enumeration, input and supported-effect results.
-- [ ] **Stage 8: Current Feedback, Pedals, Shifter & Buttons**
-  - Add only after hardware pin assignments and electrical interfaces are
-    finalized.
+- [ ] **Stage 6: Calibration and performance optimization**
+  - Validate persistent calibration, control-loop timing, filtering, thermal
+    behavior and safe force tuning.
+- [ ] **Stage 7: Required hardware expansions**
+  - Add current feedback, pedals, shifter and buttons only after their
+    electrical interfaces and pin assignments are finalized.
+
+ESP32-C3 development may be scheduled only after these STM32F401RCT6 stages
+are complete and a new explicit instruction is given.
 

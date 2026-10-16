@@ -3,7 +3,8 @@
 ## Repository layout
 
 The STM32F401RCT6 and ESP32-C3 directories are independent PlatformIO
-projects. Neither project imports source files from the other.
+projects. Neither project imports source files from the other. All active
+development targets `firmware/stm32f401rct6/`.
 
 ## Primary STM32 path
 
@@ -34,11 +35,15 @@ Responsibilities in the STM32 project are split between:
 
 ## ESP32-C3 prototype
 
+**ESP32-C3: Archived prototype — Development deferred until STM32F401RCT6 firmware is complete.**
+
 The ESP32-C3 baseline combines most logic in a single Arduino source file and
 uses USB serial/JTAG for diagnostics and test commands. Because ESP32-C3 does
 not provide the required general-purpose native USB device path, the prototype
-is not an HID PID target. It remains useful for historical comparison and
-serial-control experiments.
+is not an HID PID target. Its files are an immutable development archive unless
+the repository owner gives an explicit ESP32-C3 instruction. Routine fixes,
+formatting, dependency updates, CI expansion and feature work must not touch
+this directory.
 
 ## Future USB boundary
 
