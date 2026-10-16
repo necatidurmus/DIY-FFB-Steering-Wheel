@@ -25,6 +25,13 @@ void WheelController::begin(uint32_t nowMs) {
 #endif
   WHEEL_SERIAL.println(
       "ACILIS GUVENLI: motor kapali; 'z' ve yon dogrulamasi olmadan otomatik hareket yok");
+  WHEEL_SERIAL.print("Firmware: ");
+  WHEEL_SERIAL.print(kFirmwareVersion);
+  WHEEL_SERIAL.print(" (");
+  WHEEL_SERIAL.print(__DATE__);
+  WHEEL_SERIAL.print(" ");
+  WHEEL_SERIAL.print(__TIME__);
+  WHEEL_SERIAL.println(")");
   WHEEL_SERIAL.println(persistentConfigLoaded_
                            ? "Kalici konfigurasyon CRC/gecerlilik kontrolunden gecti"
                            : "Kalici konfigurasyon yok/bozuk; guvenli varsayilanlar kullaniliyor");
@@ -338,9 +345,7 @@ void WheelController::requestManualMotor(MotorDirection direction,
 void WheelController::commandContinuousMotor(float signedOutputPercent,
                                              MotionOwner owner,
                                              uint32_t nowMs) {
-  signedOutputPercent = wheel::clampFloat(
-      signedOutputPercent, -static_cast<float>(settings_.maximumPwmPercent),
-      static_cast<float>(settings_.maximumPwmPercent));
+  (void)owner;  // Mod-specific limitler arayanlarda zaten uygulanmıştır
   requestedOutputPercent_ = signedOutputPercent;
 
   if (fabsf(signedOutputPercent) <
@@ -353,7 +358,7 @@ void WheelController::commandContinuousMotor(float signedOutputPercent,
       signedOutputPercent, settings_.motorDirectionSign);
   const uint8_t pwmPercent = static_cast<uint8_t>(
       wheel::clampFloat(fabsf(signedOutputPercent) + 0.5F, 1.0F,
-                        settings_.maximumPwmPercent));
+                        static_cast<float>(Motor::kAbsoluteMaximumPwmPercent)));
   wheel::MotorCommand output{};
   const wheel::MotorGateAction action = motorGate_.request(
       direction, pwmPercent, owner, nowMs,
@@ -475,7 +480,7 @@ void WheelController::updatePositionController(uint32_t nowMs,
 
   const float magnitude = wheel::clampFloat(
       PositionControl::kProportionalGain * absoluteError, 0.0F,
-      static_cast<float>(settings_.maximumCenteringPwmPercent));
+      static_cast<float>(PositionControl::kMaximumPwmPercent));
   const float requested = error > 0.0F ? magnitude : -magnitude;
   const float applied = outputSlewLimiter_.update(
       requested, settings_.slewRatePercentPerSecond, elapsedUs);
@@ -536,80 +541,143 @@ void WheelController::updateCenteringController(uint32_t nowMs,
       CenteringControl::kCenterDeadbandDegrees,
       CenteringControl::kSoftZoneEndDegrees,
       static_cast<float>(settings_.maximumCenteringPwmPercent)};
-  float requested = wheel::computeCenteringDemand(angle, velocity, parameters);
-  requested = wheel::applyVirtualEndstop(
-      requested, angle, settings_.steeringRotationDegrees,
+  float pdRequested = wheel::computeCenteringDemand(angle, velocity, parameters);
+  centeringPdRequested_ = pdRequested;
+  requestedOutputPercent_ = pdRequested;
+
+  // C3 referansi: PD talebini minimum etkili PWM bolgesine koy.
+  // Merkez deadband'inden (springScale == 0) buyukse, talebi en az %22'ye
+  // (springScale ile olceklendirilmis) cikar.
+  if (fabsf(pdRequested) >= CenteringControl::kOutputOffThresholdPercent) {
+    const float minimumEffectiveOutput =
+        CenteringControl::kMinimumEffectivePwmPercent * springScale;
+    if (fabsf(pdRequested) < minimumEffectiveOutput) {
+      pdRequested = pdRequested > 0.0F ? minimumEffectiveOutput
+                                       : -minimumEffectiveOutput;
+    }
+  }
+
+  // Sanal son durak: PD talebinin uzerine yazar (askıya almadan).
+  float requested = wheel::applyVirtualEndstop(
+      pdRequested, angle, settings_.steeringRotationDegrees,
       CenteringControl::kVirtualEndstopRampDegrees,
+      CenteringControl::kEndstopStartPwmPercent,
       settings_.maximumEndstopPwmPercent);
 
+  // Cikis e-sigi: merkezdeyken veya cok talebe sahipken motoru kapat.
   if (fabsf(requested) < CenteringControl::kOutputOffThresholdPercent) {
     outputSlewLimiter_.reset();
     stopMotorOutputs();
     requestedOutputPercent_ = 0.0F;
+    centeringSlewOutput_ = 0.0F;
+    centeringFinalPwm_ = 0U;
     return;
   }
+
+  // Yon degisiminde C3 davranisini koru: slew eski yondeyse once durdur,
+  // slew'i 0'a resetle ve bu surek yeni yonu baslatma (MotorGate'in 2 ms
+  // direction dead-time'i bir sonraki surekte gecerli olacaktir).
+  const float currentSlew = outputSlewLimiter_.value();
+  if (currentSlew != 0.0F &&
+      ((requested > 0.0F) != (currentSlew > 0.0F))) {
+    outputSlewLimiter_.reset(0.0F);
+    stopMotorOutputs();
+    requestedOutputPercent_ = 0.0F;
+    centeringSlewOutput_ = 0.0F;
+    centeringFinalPwm_ = 0U;
+    return;
+  }
+
   const float applied = outputSlewLimiter_.update(
       requested, settings_.slewRatePercentPerSecond, elapsedUs);
-  commandContinuousMotor(applied, MotionOwner::kCentering, nowMs);
+  centeringSlewOutput_ = applied;
+
+  // Nihai PWM donusumu slew-rate'dan sonra: fiziksel minimum %22 zemini.
+  commandCenteringMotor(applied, nowMs);
+}
+
+void WheelController::commandCenteringMotor(float appliedOutput,
+                                            uint32_t nowMs) {
+  // Slew'tan gelen degeri nihai donanim PWM'ye donustur: 0 veya %22-100.
+  // %1-21 asla buradan cikmaz.
+  const uint8_t finalPwm = wheel::centeringAppliedOutputToPwm(appliedOutput);
+  centeringFinalPwm_ = finalPwm;
+
+  if (finalPwm == 0U) {
+    stopMotorOutputs();
+    requestedOutputPercent_ = 0.0F;
+    return;
+  }
+
+  const MotorDirection direction =
+      wheel::directionForDemand(appliedOutput, settings_.motorDirectionSign);
+  wheel::MotorCommand output{};
+  const wheel::MotorGateAction action = motorGate_.request(
+      direction, finalPwm, MotionOwner::kCentering, nowMs,
+      Motor::kControlDirectionDeadTimeMs, output);
+  if (action == wheel::MotorGateAction::kApply) {
+    applyMotorCommand(output);
+  } else {
+    halStopAllMotion();
+    appliedOutputPercent_ = 0.0F;
+  }
 }
 
 void WheelController::setFfbCommand(int16_t commandPercent,
                                     uint32_t nowMs) {
-  if (!automaticMotionAllowed("FFB seri test")) {
-    return;
-  }
+  // GAME_FFB modu: sensor sagligi, watchdog, yon korumasi ve guvenlik kilidi
+  // kontrolleri olmadan calisir (gereksinim 11).
   if (!ffbControlActive_) {
     stopAllMotion();
     ffbControlActive_ = true;
+    gameFfbModeActive_ = true;
     ffbStartedMs_ = nowMs;
     WHEEL_SERIAL.println(
-        "FFB seri test modu aktif (USB HID PID degildir, gercek tork degildir)");
+        "GAME_FFB modu aktif | maksimum PWM: %");
+    WHEEL_SERIAL.print(settings_.gameFfbMaxPwmPercent);
+    WHEEL_SERIAL.println(" | FFB kazanci: %");
+    WHEEL_SERIAL.print(settings_.ffbGainPercent);
+    WHEEL_SERIAL.println(" | korumalar/devre-suresi/devre-sureci devre disi");
   }
   ffbCommandPercent_ = commandPercent;
   lastFfbCommandMs_ = nowMs;
   if (commandPercent == 0) {
-    outputSlewLimiter_.reset();
-    stopMotorOutputs();
+    halStopAllMotion();
+    appliedOutputPercent_ = 0.0F;
   }
 }
 
 void WheelController::updateFfbController(uint32_t nowMs,
                                           uint32_t elapsedUs) {
-  if (!sensorHealthy_ || !estimator_.trusted()) {
-    stopAllMotion();
-    WHEEL_SERIAL.println("HATA: Sensor nedeniyle FFB kapatildi");
-    return;
-  }
-  if (wheel::timeReached(nowMs, lastFfbCommandMs_,
-                         Timing::kFfbWatchdogTimeoutMs)) {
-    stopAllMotion();
-    WHEEL_SERIAL.println("HATA: FFB watchdog 100 ms; motor kapatildi");
-    return;
-  }
-  if (wheel::timeReached(nowMs, ffbStartedMs_,
-                         Timing::kMaximumAutomaticSessionMs)) {
-    stopAllMotion();
-    WHEEL_SERIAL.println(
-        "HATA: FFB 30 saniye guvenli test oturumu doldu; motor kapatildi");
+  (void)nowMs;   // GAME_FFB'de watchdog/30s oturum kontroli yok (gereksinim 11)
+  (void)elapsedUs;  // GAME_FFB'de slew-rate/devre-sureci yok (gereksinim 10)
+  if (!ffbControlActive_) {
     return;
   }
 
-  float requested = wheel::clampFloat(
-      static_cast<float>(ffbCommandPercent_),
-      -static_cast<float>(settings_.maximumPwmPercent),
-      static_cast<float>(settings_.maximumPwmPercent));
-  requested = wheel::applyVirtualEndstop(
-      requested, estimator_.angleDegrees(), settings_.steeringRotationDegrees,
-      CenteringControl::kVirtualEndstopRampDegrees,
-      settings_.maximumEndstopPwmPercent);
-  if (fabsf(requested) < CenteringControl::kOutputOffThresholdPercent) {
-    outputSlewLimiter_.reset();
-    stopMotorOutputs();
+  // GAME_FFB: sensor hatasi, watchdog, 30s oturum siniri, sanal son durak,
+  // PD/damper ve slew-rate filtrelemesi yok. Sadece oyun kuvvetini PWM'ye
+  // cevirip direkt uygula (gereksinim 8, 11).
+  const uint8_t pwmPercent = wheel::ffbForceToPwm(
+      ffbCommandPercent_, settings_.ffbGainPercent,
+      settings_.ffbDeadzonePercent, settings_.gameFfbMaxPwmPercent);
+
+  if (pwmPercent == 0U) {
+    halStopAllMotion();
+    appliedOutputPercent_ = 0.0F;
     return;
   }
-  const float applied = outputSlewLimiter_.update(
-      requested, settings_.slewRatePercentPerSecond, elapsedUs);
-  commandContinuousMotor(applied, MotionOwner::kFfb, nowMs);
+
+  const float signedDemand =
+      ffbCommandPercent_ > 0 ? 1.0F : -1.0F;
+  const MotorDirection direction =
+      wheel::directionForDemand(signedDemand, settings_.motorDirectionSign);
+
+  // Direkte donanima yaz; MotorGate dead-time yok (gereksinim 11).
+  halSetMotor(direction, pwmPercent);
+  appliedOutputPercent_ =
+      ffbCommandPercent_ > 0 ? static_cast<float>(pwmPercent)
+                             : -static_cast<float>(pwmPercent);
 }
 
 void WheelController::zeroCurrentPosition() {
@@ -746,33 +814,62 @@ void WheelController::handleCommand(char* line, uint32_t nowMs) {
     }
   }
 
-  if (matchesWord(cursor, "mx") || matchesWord(cursor, "cp") ||
-      matchesWord(cursor, "ef")) {
-    const char first = static_cast<char>(tolower(cursor[0]));
-    const char second = static_cast<char>(tolower(cursor[1]));
+  // Two-letter integer commands: gf (GAME_FFB max PWM), fg (FFB gain)
+  if (matchesWord(cursor, "gf")) {
     long value = 0;
-    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 50L) {
-      WHEEL_SERIAL.println("HATA: PWM limiti 1..50 olmali");
+    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 90L) {
+      WHEEL_SERIAL.println("HATA: GAME_FFB limiti 1..90 olmali");
       return;
     }
     stopAllMotion();
-    if (first == 'm' && second == 'x') {
-      settings_.maximumPwmPercent = static_cast<uint8_t>(value);
-      if (settings_.maximumCenteringPwmPercent > value) {
-        settings_.maximumCenteringPwmPercent = static_cast<uint8_t>(value);
-      }
-      if (settings_.maximumEndstopPwmPercent > value) {
-        settings_.maximumEndstopPwmPercent = static_cast<uint8_t>(value);
-      }
-    } else if (first == 'c') {
-      settings_.maximumCenteringPwmPercent = static_cast<uint8_t>(
-          value > settings_.maximumPwmPercent ? settings_.maximumPwmPercent
-                                              : value);
-    } else {
-      settings_.maximumEndstopPwmPercent = static_cast<uint8_t>(
-          value > settings_.maximumPwmPercent ? settings_.maximumPwmPercent
-                                              : value);
+    settings_.gameFfbMaxPwmPercent = static_cast<uint8_t>(value);
+    WHEEL_SERIAL.print("GAME_FFB maksimum PWM: %");
+    WHEEL_SERIAL.println(settings_.gameFfbMaxPwmPercent);
+    return;
+  }
+  if (matchesWord(cursor, "fg")) {
+    long value = 0;
+    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 100L) {
+      WHEEL_SERIAL.println("HATA: FFB kazanci 1..100 olmali");
+      return;
     }
+    stopAllMotion();
+    settings_.ffbGainPercent = static_cast<uint8_t>(value);
+    WHEEL_SERIAL.print("FFB kazanci: %");
+    WHEEL_SERIAL.println(settings_.ffbGainPercent);
+    return;
+  }
+
+  if (matchesWord(cursor, "mx")) {
+    long value = 0;
+    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 50L) {
+      WHEEL_SERIAL.println("HATA: Manuel PWM limiti 1..50 olmali");
+      return;
+    }
+    stopAllMotion();
+    settings_.maximumPwmPercent = static_cast<uint8_t>(value);
+    printConfiguration();
+    return;
+  }
+  if (matchesWord(cursor, "cp")) {
+    long value = 0;
+    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 50L) {
+      WHEEL_SERIAL.println("HATA: Merkezleme PWM limiti 1..50 olmali");
+      return;
+    }
+    stopAllMotion();
+    settings_.maximumCenteringPwmPercent = static_cast<uint8_t>(value);
+    printConfiguration();
+    return;
+  }
+  if (matchesWord(cursor, "ef")) {
+    long value = 0;
+    if (!parseLongArgument(cursor + 2, value) || value < 1L || value > 100L) {
+      WHEEL_SERIAL.println("HATA: Sanal son durak PWM limiti 1..100 olmali");
+      return;
+    }
+    stopAllMotion();
+    settings_.maximumEndstopPwmPercent = static_cast<uint8_t>(value);
     printConfiguration();
     return;
   }
@@ -901,12 +998,14 @@ void WheelController::handleCommand(char* line, uint32_t nowMs) {
 void WheelController::printHelp() const {
   WHEEL_SERIAL.println("Komutlar:");
   WHEEL_SERIAL.println("  s            yazilimsal stop (fiziksel E-stop degil)");
-  WHEEL_SERIAL.println("  r/l [1-50]   500 ms manuel yon testi (varsayilan %10)");
+  WHEEL_SERIAL.println("  r/l [1-50]   500 ms manuel yon testi (varsayilan %22)");
   WHEEL_SERIAL.println("  z            mevcut fiziksel merkezi sifirla");
   WHEEL_SERIAL.println("  d / e        motor / enkoder yon isaretini tersle");
   WHEEL_SERIAL.println("  v            dusuk guc yon testini kullanici olarak onayla");
   WHEEL_SERIAL.println("  c on/off     PD merkezlemeyi ac/kapat");
-  WHEEL_SERIAL.println("  f -100..100  timeout'lu seri kuvvet testi; HID PID degil");
+  WHEEL_SERIAL.println("  f -100..100  GAME_FFB seri kuvvet testi (korumalar devre disi)");
+  WHEEL_SERIAL.println("  gf <1-90>    GAME_FFB maksimum PWM limiti (varsayilan %90)");
+  WHEEL_SERIAL.println("  fg <1-100>   FFB kazanci (varsayilan %100)");
   WHEEL_SERIAL.println("  g -90..90    sinirli hedef konum testi");
   WHEEL_SERIAL.println("  m 360/900/1080 | kp | kd | rt | mx | cp | ef");
   WHEEL_SERIAL.println("  a            guvenli varsayilan kazanc/limitler; motoru acmaz");
@@ -928,6 +1027,12 @@ void WheelController::printConfiguration() const {
   WHEEL_SERIAL.print(settings_.maximumCenteringPwmPercent);
   WHEEL_SERIAL.print('/');
   WHEEL_SERIAL.print(settings_.maximumEndstopPwmPercent);
+  WHEEL_SERIAL.print(" gameFfbMax=");
+  WHEEL_SERIAL.print(settings_.gameFfbMaxPwmPercent);
+  WHEEL_SERIAL.print(" ffbGain=");
+  WHEEL_SERIAL.print(settings_.ffbGainPercent);
+  WHEEL_SERIAL.print(" ffbDz=");
+  WHEEL_SERIAL.print(settings_.ffbDeadzonePercent);
   WHEEL_SERIAL.print(" mdir/edir=");
   WHEEL_SERIAL.print(settings_.motorDirectionSign);
   WHEEL_SERIAL.print('/');
@@ -973,10 +1078,27 @@ void WheelController::printStatus(uint32_t nowMs) const {
       estimator_.trusted() && !calibrationRequired_));
   WHEEL_SERIAL.print(" mode=");
   WHEEL_SERIAL.print(ownerName());
-  WHEEL_SERIAL.print(" pwm=");
-  WHEEL_SERIAL.print(motorGate_.activeCommand().pwmPercent);
-  WHEEL_SERIAL.print(" req=");
-  WHEEL_SERIAL.print(requestedOutputPercent_, 1);
+  if (motorGate_.owner() == MotionOwner::kCentering) {
+    WHEEL_SERIAL.print(" pd_req=");
+    WHEEL_SERIAL.print(centeringPdRequested_, 1);
+    WHEEL_SERIAL.print(" slew=");
+    WHEEL_SERIAL.print(centeringSlewOutput_, 1);
+    WHEEL_SERIAL.print(" final_pwm=");
+    WHEEL_SERIAL.print(centeringFinalPwm_);
+    WHEEL_SERIAL.print(" direction=");
+    const wheel::MotorDirection dir =
+        wheel::directionForDemand(centeringSlewOutput_,
+                                  settings_.motorDirectionSign);
+    WHEEL_SERIAL.print(dir == wheel::MotorDirection::kRight
+                           ? "RIGHT"
+                           : (dir == wheel::MotorDirection::kLeft ? "LEFT"
+                                                                  : "OFF"));
+  } else {
+    WHEEL_SERIAL.print(" pwm=");
+    WHEEL_SERIAL.print(motorGate_.activeCommand().pwmPercent);
+    WHEEL_SERIAL.print(" req=");
+    WHEEL_SERIAL.print(requestedOutputPercent_, 1);
+  }
   WHEEL_SERIAL.print(" cal=");
   WHEEL_SERIAL.print(calibrationRequired_ ? "REQUIRED" : "OK");
   WHEEL_SERIAL.print(" sensor_us=");

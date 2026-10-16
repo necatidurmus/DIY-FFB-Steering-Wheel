@@ -121,13 +121,36 @@ struct CenteringParameters {
 float computeCenteringDemand(float angleDegrees,
                              float angularVelocityDegreesPerSecond,
                              const CenteringParameters& parameters);
+// C3 ile birebir aynı virtual endstop algoritması:
+// endstopMagnitude = startPwm + (maxPwm - startPwm) * smoothstep(position)
+// requestedOutput = angle > 0 ? -endstopMagnitude : endstopMagnitude
 float applyVirtualEndstop(float requestedOutputPercent, float angleDegrees,
                           uint16_t rotationDegrees, float rampDegrees,
-                          float maximumEndstopPercent);
+                          float startPwmPercent, float maximumEndstopPercent);
 MotorDirection directionForDemand(float signedDemand,
                                   int8_t motorDirectionSign);
 int16_t angleToHidAxis(float angleDegrees, uint16_t rotationDegrees,
                        bool calibrated);
+
+// GAME_FFB icin kalibre edilebilir kuvvet->PWM donusumu.
+// Kucuk kuvvetler deadzone'nin altinda 0 PWM cikarir; buyuk kuvvetler
+// lineer olarak gameFfbMaxPwmPercent'e dogru yukselir. %22 civari minimum
+// etkili esik hesaba katilir fakat kucuk gucleri zorla %22'ye sabitlemez
+// (bu titreşime neden olur).
+uint8_t ffbForceToPwm(int16_t forcePercent, uint8_t gainPercent,
+                      uint8_t deadzonePercent, uint8_t maxPwmPercent);
+
+// Merkezleme uygulanan cikisi (slewi takiben) donanim PWM'ye cevirir.
+//  |output| < 0.5  -> 0  (merkez deadband, motor kapali)
+//  0.5 ... <22     -> 22 (fiziksel minimum etkili PWM zemini)
+//  22 ...          -> round(output)
+// Bu fonksiyon yalnizca magnitudu dondurur; isaret/yön ayrı tutulur.
+// Esik degeri include/wheel_config.h'daki
+// CenteringControl::kOutputOffThresholdPercent (0.5) ve
+// CenteringControl::kMinimumEffectivePwmPercent (22.0) ile aynidir.
+// WheelLogic'den wheel_config'e (Arduino) bagimlilik olmamak icin sabitler
+// burada ayni degerlerle tanimlanmistir.
+uint8_t centeringAppliedOutputToPwm(float appliedOutput);
 
 struct WheelInputState {
   int16_t steering = 0;
@@ -153,11 +176,13 @@ struct WheelSettings {
   int8_t encoderDirectionSign;
   uint8_t sensorCalibrated;
   uint8_t directionValidated;
-  uint8_t reserved[3];
+  uint8_t gameFfbMaxPwmPercent;    // GAME_FFB motor cikis maximum PWM (default 90)
+  uint8_t ffbGainPercent;          // FFB kazanci (default 100)
+  uint8_t ffbDeadzonePercent;      // Kuvvet-uslu deadzone (default 5)
 };
 
 constexpr uint32_t kSettingsMagic = 0x57484646UL;  // "WHFF"
-constexpr uint16_t kSettingsVersion = 1U;
+constexpr uint16_t kSettingsVersion = 2U;
 
 struct SettingsRecord {
   uint32_t magic;

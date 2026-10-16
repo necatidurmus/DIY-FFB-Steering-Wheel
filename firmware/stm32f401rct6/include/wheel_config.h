@@ -36,8 +36,12 @@ namespace Motor {
 constexpr uint8_t kRpwmChannel = 3U;
 constexpr uint8_t kLpwmChannel = 4U;
 constexpr uint32_t kPwmFrequencyHz = 20000U;
-constexpr uint8_t kAbsoluteMaximumPwmPercent = 50U;
-constexpr uint8_t kDefaultManualPwmPercent = 10U;
+// Donanım HAL katmanı %0-100 arası PWM komutunu desteklemeli.
+// Mod special limitleri kontrolcü katmanında uygulanır, HAL'de değil.
+constexpr uint8_t kAbsoluteMaximumPwmPercent = 100U;
+constexpr uint8_t kDefaultManualPwmPercent = 22U;
+constexpr uint8_t kMinimumPwmPercent = 1U;
+constexpr uint8_t kMaximumPwmPercent = 50U;
 constexpr uint32_t kManualDeadTimeMs = 50U;
 constexpr uint32_t kControlDirectionDeadTimeMs = 2U;
 constexpr uint32_t kMaximumManualRunTimeMs = 500U;
@@ -61,7 +65,9 @@ constexpr float kMinimumTargetDegrees = -90.0F;
 constexpr float kMaximumTargetDegrees = 90.0F;
 constexpr float kMaximumSafePositionDegrees = 100.0F;
 constexpr float kToleranceDegrees = 2.0F;
-constexpr float kProportionalGain = 0.40F;
+constexpr float kProportionalGain = 0.20F;
+constexpr uint8_t kMinimumPwmPercent = 22;
+constexpr uint8_t kMaximumPwmPercent = 50;
 constexpr uint32_t kMoveTimeoutMs = 3000U;
 constexpr uint32_t kStallTimeoutMs = 700U;
 constexpr float kProgressThresholdDegrees = 0.50F;
@@ -72,8 +78,16 @@ constexpr float kDirectionErrorMarginDegrees = 1.0F;
 namespace CenteringControl {
 constexpr float kCenterDeadbandDegrees = 0.5F;
 constexpr float kSoftZoneEndDegrees = 3.0F;
-constexpr float kVirtualEndstopRampDegrees = 20.0F;
+constexpr float kMinimumEffectivePwmPercent = 22.0F;
+constexpr float kMaximumPdPwmPercent = 30.0F;
+constexpr float kDefaultKp = 0.40F;
+constexpr float kDefaultKd = 0.025F;
+constexpr float kDefaultSlewRatePercentPerSecond = 80.0F;
 constexpr float kOutputOffThresholdPercent = 0.5F;
+
+constexpr float kVirtualEndstopRampDegrees = 20.0F;
+constexpr float kEndstopStartPwmPercent = 30.0F;
+constexpr float kEndstopMaximumPwmPercent = 100.0F;
 }  // namespace CenteringControl
 
 enum class SensorResult : uint8_t {
